@@ -4,7 +4,7 @@ A macOS driver for Deepcool LM series AIO coolers with LCD displays (320x240). F
 
 ![LM360 Display](https://img.shields.io/badge/Resolution-320x240-blue) ![License](https://img.shields.io/badge/License-MIT-green)
 
-![Deepcool LM360 Display Preview](lm360.png)
+![Deepcool LM360 Display Preview](38014.jpg)
 
 > **Note**: This driver is designed for Deepcool LM series coolers. Currently tested and confirmed working on **LM360** only. Other LM series models (LM240, LM280, etc.) may work but have not been tested. Contributions and testing reports are welcome!
 
@@ -44,12 +44,12 @@ The monitor interface features:
 
 **Method A: Direct download and run**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/daedlock/deepcool-lm/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/kreactnative/deepcool-lm-hackintosh/main/install.sh | sudo bash
 ```
 
 **Method B: Download, review, then run**
 ```bash
-curl -O https://raw.githubusercontent.com/daedlock/deepcool-lm/main/install.sh
+curl -O https://raw.githubusercontent.com/kreactnative/deepcool-lm-hackintosh/main/install.sh
 chmod +x install.sh
 sudo ./install.sh
 ```
@@ -65,9 +65,9 @@ brew install python libusb
 **2. Download and Install**
 
 ```bash
-git clone https://github.com/daedlock/deepcool-lm.git
-cd deepcool-lm
-curl -O https://raw.githubusercontent.com/daedlock/deepcool-lm/main/install.sh
+git clone https://github.com/kreactnative/deepcool-lm-hackintosh.git
+cd deepcool-lm-hackintosh
+curl -O https://raw.githubusercontent.com/kreactnative/deepcool-lm-hackintosh/main/install.sh
 chmod +x install.sh
 sudo ./install.sh
 ```
