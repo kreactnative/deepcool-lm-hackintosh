@@ -1,6 +1,6 @@
-# Deepcool LM Series LCD Driver for Linux and macOS
+# Deepcool LM Series LCD Driver for macOS
 
-A cross-platform driver for Deepcool LM series AIO coolers with LCD displays (320x240). It supports Linux and macOS, with a polished system monitoring interface, real-time CPU and GPU temperature display, CPU usage tracking, and custom image support.
+A macOS driver for Deepcool LM series AIO coolers with LCD displays (320x240). Features a polished system monitoring interface, real-time CPU and GPU temperature display, CPU usage tracking, and custom image support.
 
 ![LM360 Display](https://img.shields.io/badge/Resolution-320x240-blue) ![License](https://img.shields.io/badge/License-MIT-green)
 
@@ -33,12 +33,6 @@ The monitor interface features:
 
 ### Prerequisites
 
-#### Linux
-- **libusb**: USB device communication library
-- **lm_sensors**: Temperature monitoring
-- **Python 3.7+** with `pyusb`, `psutil`, `pillow` modules
-
-#### macOS
 - **Homebrew**: Package manager
 - **Python 3.8+**: Available via Homebrew
 - **libusb**: USB device communication library
@@ -46,19 +40,7 @@ The monitor interface features:
 
 ### Step-by-Step Installation
 
-#### Option 1: Linux - Arch Linux (AUR)
-
-This is the easiest method on Arch Linux:
-
-```bash
-yay -S deepcool-lm
-```
-
-The service will automatically start if your device is connected!
-
-#### Option 2: Linux & macOS - Automated Script
-
-For other Linux distributions or macOS, use the automated installer:
+#### Option 1: Automated Script
 
 **Method A: Direct download and run**
 ```bash
@@ -72,49 +54,7 @@ chmod +x install.sh
 sudo ./install.sh
 ```
 
-#### Option 3: Manual Installation (Linux)
-
-**1. Install Dependencies**
-
-For Arch Linux:
-```bash
-sudo pacman -S lm_sensors python-pyusb python-psutil python-pillow libusb
-```
-
-For Ubuntu/Debian:
-```bash
-sudo apt install lm-sensors python3-usb python3-psutil python3-pil libusb-1.0-0
-```
-
-For Fedora:
-```bash
-sudo dnf install lm_sensors python3-pyusb python3-psutil python3-pillow libusb
-```
-
-**2. Configure Temperature Monitoring**
-
-```bash
-sudo sensors-detect  # Answer YES to save configuration
-sudo systemctl enable --now lm_sensors
-```
-
-**3. Download and Install**
-
-```bash
-git clone https://github.com/daedlock/deepcool-lm.git
-cd deepcool-lm
-chmod +x deepcool-lm deepcool-lm.install
-sudo ./deepcool-lm.install
-```
-
-**4. Enable the Service**
-
-```bash
-sudo systemctl enable deepcool-lm
-sudo systemctl start deepcool-lm
-```
-
-#### Option 4: Manual Installation (macOS)
+#### Option 2: Manual Installation
 
 **1. Install Runtime Dependencies**
 
@@ -148,20 +88,6 @@ launchctl enable system/com.deepcool.lm
 ```
 
 ## Post-Installation Verification
-
-### Linux
-
-Check service status:
-```bash
-sudo systemctl status deepcool-lm
-```
-
-View logs:
-```bash
-sudo journalctl -u deepcool-lm -f
-```
-
-### macOS
 
 Check LaunchDaemon status:
 ```bash
@@ -200,35 +126,34 @@ deepcool-lm --help
 
 ### Device Not Detected
 
-**Linux**: Verify the Deepcool LM device appears:
-```bash
-lsusb | grep 3633
-```
+Check System Information > USB for the Deepcool device.
 
-**macOS**: Check System Information > USB for the Deepcool device
+If not detected:
+- Ensure your Deepcool LM series cooler is plugged in
+- Try reconnecting the USB cable
+- Restart the system if necessary
 
 ### Temperature Shows 0°
 
-**macOS**: This typically means `powermetrics` cannot read your sensors. The display will still work but won't show accurate temperatures. Check logs for details.
+This typically means `powermetrics` cannot read your sensors. The display will still work but won't show accurate temperatures. Check logs for details:
 
-**Linux**: Ensure `lm_sensors` is properly configured:
 ```bash
-sudo systemctl status lm_sensors
-sensors
+sudo tail -20 /var/log/deepcool-lm.err
 ```
 
 ### Service Won't Start
 
-**Linux**: Check logs for error messages:
-```bash
-sudo journalctl -u deepcool-lm -n 50
-```
+Check the log files for error messages:
 
-**macOS**: Check the log files:
 ```bash
 sudo tail -20 /var/log/deepcool-lm.log
 sudo tail -20 /var/log/deepcool-lm.err
 ```
+
+Common issues:
+- Python dependencies not installed: `brew install python libusb`
+- Device not connected: Verify in System Information > USB
+- Permissions issue: Try reinstalling with `sudo ./install.sh`
 
 ## Usage
 
