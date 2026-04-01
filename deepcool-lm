@@ -3,17 +3,33 @@
 Deepcool LM360 LCD Driver - Unified CLI Tool
 Supports system monitoring, brightness control, and custom image rendering
 """
-import usb.core
-import usb.util
 import sys
+import os
+
+try:
+    import usb.core
+    import usb.util
+    import usb.backend.libusb1
+    import psutil
+    from PIL import Image, ImageDraw, ImageFont
+except ModuleNotFoundError as exc:
+    missing_name = exc.name or 'required module'
+    print(f"Missing Python dependency: {missing_name}", file=sys.stderr)
+    print(f"Current interpreter: {sys.executable}", file=sys.stderr)
+    print("Install the required packages for this interpreter:", file=sys.stderr)
+    print(f"  sudo {sys.executable} -m pip install pyusb psutil pillow", file=sys.stderr)
+    print("If you are on macOS, prefer rerunning sudo ./install.sh so the launcher uses a dedicated runtime.", file=sys.stderr)
+    sys.exit(1)
+
 import time
 import argparse
-import psutil
 import socket
 import json
-import os
+import platform
+import re
+import subprocess
 import threading
-from PIL import Image, ImageDraw, ImageFont
+import tempfile
 
 VENDOR_ID = 0x3633
 PRODUCT_ID = 0x0026
@@ -25,7 +41,45 @@ HEIGHT = 240
 FRAME_HEADER = bytes([0xaa, 0x08, 0x00, 0x00, 0x01, 0x00, 0x58, 0x02, 0x00, 0x2c, 0x01, 0xbc, 0x11])
 
 # IPC socket path
-SOCKET_PATH = "/var/run/deepcool-lm.sock"
+PLATFORM_SYSTEM = platform.system()
+
+
+def get_socket_path():
+    """Return the IPC socket path for the current platform."""
+    socket_override = os.environ.get('DEEPCOOL_LM_SOCKET')
+    if socket_override:
+        return socket_override
+    if PLATFORM_SYSTEM == 'Linux':
+        return '/var/run/deepcool-lm.sock'
+    return os.path.join(tempfile.gettempdir(), 'deepcool-lm.sock')
+
+
+SOCKET_PATH = get_socket_path()
+
+
+def find_libusb_backend():
+    """Resolve a PyUSB backend, with explicit Homebrew fallbacks on macOS."""
+    backend = usb.backend.libusb1.get_backend()
+    if backend is not None:
+        return backend
+
+    if PLATFORM_SYSTEM != 'Darwin':
+        return None
+
+    candidate_paths = [
+        '/usr/local/lib/libusb-1.0.dylib',
+        '/usr/local/opt/libusb/lib/libusb-1.0.dylib',
+        '/opt/homebrew/lib/libusb-1.0.dylib',
+        '/opt/homebrew/opt/libusb/lib/libusb-1.0.dylib',
+    ]
+
+    for path in candidate_paths:
+        if os.path.exists(path):
+            backend = usb.backend.libusb1.get_backend(find_library=lambda _name, lib_path=path: lib_path)
+            if backend is not None:
+                return backend
+
+    return None
 
 class DisplayState:
     """Manages the current display state"""
@@ -64,6 +118,8 @@ class IPCServer:
 
     def start(self):
         """Start the IPC server in a background thread"""
+        os.makedirs(os.path.dirname(self.socket_path), exist_ok=True)
+
         # Remove old socket if it exists
         try:
             os.unlink(self.socket_path)
@@ -177,7 +233,12 @@ def send_ipc_command(cmd):
 
         sock.close()
         return json.loads(response.decode('utf-8'))
-    except FileNotFoundError:
+    except (FileNotFoundError, ConnectionRefusedError):
+        try:
+            if os.path.exists(SOCKET_PATH):
+                os.unlink(SOCKET_PATH)
+        except OSError:
+            pass
         return None  # Service not running
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
@@ -186,20 +247,34 @@ class LM360:
     def __init__(self):
         self.dev = None
         self.interface = 0
+        self.backend = None
 
     def connect(self):
-        self.dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
+        self.backend = find_libusb_backend()
+        if self.backend is None:
+            raise RuntimeError(
+                "No USB backend available. Install libusb on macOS with 'brew install libusb'."
+            )
+
+        self.dev = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID, backend=self.backend)
         if self.dev is None:
             return False
-        if self.dev.is_kernel_driver_active(self.interface):
+
+        kernel_driver_active = False
+        try:
+            kernel_driver_active = self.dev.is_kernel_driver_active(self.interface)
+        except (NotImplementedError, AttributeError, usb.core.USBError):
+            kernel_driver_active = False
+
+        if kernel_driver_active:
             try:
                 self.dev.detach_kernel_driver(self.interface)
-            except:
+            except (NotImplementedError, AttributeError, usb.core.USBError):
                 pass
         try:
             self.dev.set_configuration()
             usb.util.claim_interface(self.dev, self.interface)
-        except:
+        except usb.core.USBError:
             return False
         return True
 
@@ -268,18 +343,170 @@ def get_temp_color(temp):
     else:
         return (255, 50, 50)    # Red
 
+def load_font(size, candidates):
+    """Load the first available font from the given candidate list."""
+    try:
+        for path in candidates:
+            if os.path.exists(path):
+                return ImageFont.truetype(path, size)
+    except:
+        pass
+    return ImageFont.load_default()
+
+
 def load_fonts():
     """Load fonts with fallback"""
+    bold_candidates = [
+        "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Helvetica.ttc",
+    ]
+    regular_candidates = [
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/System/Library/Fonts/Supplemental/Helvetica.ttc",
+    ]
+
+    return {
+        'medium': load_font(40, bold_candidates),
+        'normal': load_font(26, regular_candidates),
+        'normal_bold': load_font(26, bold_candidates),
+        'small': load_font(20, regular_candidates),
+    }
+
+
+def extract_temperature(output, patterns):
+    """Extract the first matching temperature from a text blob."""
+    for pattern in patterns:
+        match = re.search(pattern, output, re.IGNORECASE)
+        if match:
+            return round(float(match.group(1)), 1)
+    return 0.0
+
+
+def _get_cpu_temp_osx_cpu_temp():
+    """Read CPU temperature via osx-cpu-temp (works on Hackintosh/VirtualSMC)."""
+    # Use explicit paths because launchd runs with a minimal PATH (/usr/bin:/bin only)
+    candidates = [
+        '/usr/local/bin/osx-cpu-temp',           # Homebrew Intel
+        '/opt/homebrew/bin/osx-cpu-temp',         # Homebrew Apple Silicon
+        'osx-cpu-temp',                           # fallback when PATH includes it
+    ]
+    for cmd in candidates:
+        try:
+            result = subprocess.run(
+                [cmd],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+            output = result.stdout.strip()
+            # Output format: "51.0°C"
+            match = re.search(r'([0-9.]+)', output)
+            if match:
+                return round(float(match.group(1)), 1)
+        except (FileNotFoundError, subprocess.SubprocessError):
+            continue
+    return 0.0
+
+
+def _get_gpu_temp_ioreg():
+    """Read GPU temperature from IOAccelerator PerformanceStatistics via ioreg."""
     try:
-        return {
-            'medium': ImageFont.truetype("/usr/share/fonts/TTF/DejaVuSans-Bold.ttf", 40),
-            'normal': ImageFont.truetype("/usr/share/fonts/TTF/DejaVuSans.ttf", 26),
-            'normal_bold': ImageFont.truetype("/usr/share/fonts/TTF/DejaVuSans-Bold.ttf", 26),
-            'small': ImageFont.truetype("/usr/share/fonts/TTF/DejaVuSans.ttf", 20),
-        }
+        result = subprocess.run(
+            ['ioreg', '-rc', 'IOAccelerator'],
+            capture_output=True,
+            text=True,
+            timeout=4,
+            check=False,
+        )
+        output = result.stdout or ''
+        # Find the first "Temperature(C)"=<number> in PerformanceStatistics
+        match = re.search(r'"Temperature\(C\)"\s*=\s*([0-9]+)', output)
+        if match:
+            return round(float(match.group(1)), 1)
+    except (FileNotFoundError, subprocess.SubprocessError):
+        pass
+    return 0.0
+
+
+def get_macos_temperatures():
+    """Read CPU and GPU temperatures on macOS.
+
+    Strategy:
+    1. CPU: osx-cpu-temp (works on Hackintosh with VirtualSMC/FakeSMC)
+    2. GPU: ioreg IOAccelerator PerformanceStatistics (works for AMD/Intel GPUs)
+    3. Fallback: powermetrics --samplers smc (works on real Macs with Apple SMC)
+    """
+    cpu_temp = _get_cpu_temp_osx_cpu_temp()
+    gpu_temp = _get_gpu_temp_ioreg()
+
+    if cpu_temp > 0.0 or gpu_temp > 0.0:
+        return {'cpu_temp': cpu_temp, 'gpu_temp': gpu_temp}
+
+    # Fallback to powermetrics for real Macs
+    try:
+        result = subprocess.run(
+            ['powermetrics', '--samplers', 'smc', '-n', '1', '--format', 'text'],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return {}
+
+    output = result.stdout or ''
+    if not output:
+        return {}
+
+    return {
+        'cpu_temp': extract_temperature(output, [
+            r'CPU die temperature:\s*([0-9.]+)\s*C',
+            r'SoC die temperature:\s*([0-9.]+)\s*C',
+        ]),
+        'gpu_temp': extract_temperature(output, [
+            r'GPU die temperature:\s*([0-9.]+)\s*C',
+        ]),
+    }
+
+
+def get_cpu_frequency_ghz():
+    """Read CPU frequency with platform-specific fallbacks."""
+    try:
+        freq = psutil.cpu_freq()
+        if freq and freq.current:
+            return round(freq.current / 1000, 2)
     except:
-        default = ImageFont.load_default()
-        return {k: default for k in ['medium', 'normal', 'normal_bold', 'small']}
+        pass
+
+    if PLATFORM_SYSTEM == 'Darwin':
+        for key in ('hw.cpufrequency', 'hw.cpufrequency_max'):
+            try:
+                result = subprocess.run(
+                    ['sysctl', '-n', key],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                    check=False,
+                )
+                value = result.stdout.strip()
+                if value.isdigit() and int(value) > 0:
+                    return round(int(value) / 1_000_000_000, 2)
+            except (FileNotFoundError, subprocess.SubprocessError):
+                pass
+
+    return 0.0
+
+
+def get_device_hint():
+    """Return a platform-specific device detection hint."""
+    if PLATFORM_SYSTEM == 'Darwin':
+        return 'Device is visible in macOS USB info (ioreg -p IOUSB -l | grep 3633)'
+    return 'Device is plugged in (lsusb | grep 3633)'
 
 def get_system_info():
     """Get all system information"""
@@ -292,20 +519,21 @@ def get_system_info():
 
     # CPU temperature
     try:
-        temps = psutil.sensors_temperatures()
-        if 'coretemp' in temps and len(temps['coretemp']) > 0:
-            info['cpu_temp'] = round(temps['coretemp'][0].current, 1)
-        if 'nvme' in temps and len(temps['nvme']) > 0:
-            info['gpu_temp'] = round(temps['nvme'][0].current, 1)
+        if PLATFORM_SYSTEM == 'Darwin':
+            info.update(get_macos_temperatures())
+        else:
+            temps = psutil.sensors_temperatures()
+            if 'coretemp' in temps and len(temps['coretemp']) > 0:
+                info['cpu_temp'] = round(temps['coretemp'][0].current, 1)
+            if 'nvme' in temps and len(temps['nvme']) > 0:
+                info['gpu_temp'] = round(temps['nvme'][0].current, 1)
     except:
         pass
 
     # CPU usage and frequency
     try:
         info['cpu_percent'] = round(psutil.cpu_percent(interval=0.1), 1)
-        freq = psutil.cpu_freq()
-        if freq:
-            info['cpu_freq'] = round(freq.current / 1000, 2)
+        info['cpu_freq'] = get_cpu_frequency_ghz()
     except:
         pass
 
@@ -568,6 +796,7 @@ Examples:
 
     # Check if we should use IPC (service is already running)
     service_running = os.path.exists(SOCKET_PATH)
+    fallback_to_direct = False
 
     if args.command in use_ipc_commands and service_running:
         # Service is running, use IPC
@@ -579,25 +808,38 @@ Examples:
             if response and response.get('status') == 'ok':
                 print("✓ Switched to monitoring mode")
                 sys.exit(0)
+            elif response is None:
+                fallback_to_direct = True
             else:
                 print("✗ Failed to switch to monitoring mode")
                 sys.exit(1)
-    elif args.command == 'monitor' and not service_running:
+
+    if args.command == 'monitor' and (not service_running or fallback_to_direct):
         # Starting monitor service directly (not via IPC)
         device = LM360()
-        if not device.connect():
+        try:
+            connected = device.connect()
+        except RuntimeError as exc:
+            print(f"✗ {exc}")
+            sys.exit(1)
+        if not connected:
             print("✗ Failed to connect to LM360")
             print("  Make sure:")
-            print("  - Device is plugged in (lsusb | grep 3633)")
+            print(f"  - {get_device_hint()}")
             print("  - Running with sudo")
             sys.exit(1)
     else:
         # Need direct USB access for other commands
         device = LM360()
-        if not device.connect():
+        try:
+            connected = device.connect()
+        except RuntimeError as exc:
+            print(f"✗ {exc}")
+            sys.exit(1)
+        if not connected:
             print("✗ Failed to connect to LM360")
             print("  Make sure:")
-            print("  - Device is plugged in (lsusb | grep 3633)")
+            print(f"  - {get_device_hint()}")
             print("  - Running with sudo")
             sys.exit(1)
 

@@ -1,6 +1,6 @@
-# Deepcool LM Series LCD Driver for Linux
+# Deepcool LM Series LCD Driver for Linux and macOS
 
-A comprehensive Linux driver for Deepcool LM series AIO coolers with LCD displays (320x240). Features a polished system monitoring interface with real-time CPU/GPU temperature display, CPU usage tracking, and custom image support.
+A cross-platform driver for Deepcool LM series AIO coolers with LCD displays (320x240). It supports Linux and macOS, with a polished system monitoring interface, real-time CPU and GPU temperature display, CPU usage tracking, and custom image support.
 
 ![LM360 Display](https://img.shields.io/badge/Resolution-320x240-blue) ![License](https://img.shields.io/badge/License-MIT-green)
 
@@ -31,7 +31,24 @@ The monitor interface features:
 
 ## Installation
 
-### Arch Linux (AUR)
+### Prerequisites
+
+#### Linux
+- **libusb**: USB device communication library
+- **lm_sensors**: Temperature monitoring
+- **Python 3.7+** with `pyusb`, `psutil`, `pillow` modules
+
+#### macOS
+- **Homebrew**: Package manager
+- **Python 3.8+**: Available via Homebrew
+- **libusb**: USB device communication library
+- Optional: **powermetrics** (usually pre-installed) for temperature monitoring
+
+### Step-by-Step Installation
+
+#### Option 1: Linux - Arch Linux (AUR)
+
+This is the easiest method on Arch Linux:
 
 ```bash
 yay -S deepcool-lm
@@ -39,48 +56,185 @@ yay -S deepcool-lm
 
 The service will automatically start if your device is connected!
 
-### Other Distributions
+#### Option 2: Linux & macOS - Automated Script
 
+For other Linux distributions or macOS, use the automated installer:
+
+**Method A: Direct download and run**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/daedlock/deepcool-lm/main/install.sh | sudo bash
 ```
 
-Or download and run manually:
+**Method B: Download, review, then run**
 ```bash
 curl -O https://raw.githubusercontent.com/daedlock/deepcool-lm/main/install.sh
 chmod +x install.sh
 sudo ./install.sh
 ```
 
-## Post-Installation Setup
+#### Option 3: Manual Installation (Linux)
 
-### Configure Temperature Sensors
+**1. Install Dependencies**
 
-The driver requires `lm_sensors` for temperature monitoring:
+For Arch Linux:
+```bash
+sudo pacman -S lm_sensors python-pyusb python-psutil python-pillow libusb
+```
+
+For Ubuntu/Debian:
+```bash
+sudo apt install lm-sensors python3-usb python3-psutil python3-pil libusb-1.0-0
+```
+
+For Fedora:
+```bash
+sudo dnf install lm_sensors python3-pyusb python3-psutil python3-pillow libusb
+```
+
+**2. Configure Temperature Monitoring**
 
 ```bash
 sudo sensors-detect  # Answer YES to save configuration
 sudo systemctl enable --now lm_sensors
 ```
 
-### Install Dependencies (Non-AUR)
-
-If installing via `install.sh`, ensure these are installed first:
+**3. Download and Install**
 
 ```bash
-# Arch Linux
-sudo pacman -S lm_sensors python-pyusb python-psutil python-pillow
+git clone https://github.com/daedlock/deepcool-lm.git
+cd deepcool-lm
+chmod +x deepcool-lm deepcool-lm.install
+sudo ./deepcool-lm.install
+```
 
-# Ubuntu/Debian
-sudo apt install lm-sensors python3-usb python3-psutil python3-pil
+**4. Enable the Service**
 
-# Fedora
-sudo dnf install lm_sensors python3-pyusb python3-psutil python3-pillow
+```bash
+sudo systemctl enable deepcool-lm
+sudo systemctl start deepcool-lm
+```
+
+#### Option 4: Manual Installation (macOS)
+
+**1. Install Runtime Dependencies**
+
+```bash
+brew install python libusb
+```
+
+**2. Download and Install**
+
+```bash
+git clone https://github.com/daedlock/deepcool-lm.git
+cd deepcool-lm
+curl -O https://raw.githubusercontent.com/daedlock/deepcool-lm/main/install.sh
+chmod +x install.sh
+sudo ./install.sh
+```
+
+The installer will:
+- Create an isolated Python virtual environment at `/usr/local/libexec/deepcool-lm/.venv`
+- Install `pyusb`, `psutil`, and `pillow` into the venv
+- Install the CLI launcher at `/usr/local/bin/deepcool-lm`
+- Optionally install a LaunchDaemon for automatic startup
+
+**3. Enable Automatic Startup (Optional)**
+
+If you didn't enable it during installation:
+
+```bash
+launchctl bootstrap system /Library/LaunchDaemons/com.deepcool.lm.plist
+launchctl enable system/com.deepcool.lm
+```
+
+## Post-Installation Verification
+
+### Linux
+
+Check service status:
+```bash
+sudo systemctl status deepcool-lm
+```
+
+View logs:
+```bash
+sudo journalctl -u deepcool-lm -f
+```
+
+### macOS
+
+Check LaunchDaemon status:
+```bash
+launchctl print system/com.deepcool.lm
+```
+
+View logs:
+```bash
+sudo tail -f /var/log/deepcool-lm.log
+sudo tail -f /var/log/deepcool-lm.err
 ```
 
 ## Usage
 
-### Systemd Service (Recommended)
+Once installed, use these commands to control the display:
+
+```bash
+# Start system monitoring mode
+sudo deepcool-lm monitor
+
+# Display a custom image (auto-resized to 320x240)
+sudo deepcool-lm image /path/to/image.jpg
+
+# Display solid color (RGB format)
+sudo deepcool-lm solid --color 255 0 0
+
+# Adjust brightness
+sudo deepcool-lm brightness up
+sudo deepcool-lm brightness down
+
+# Show all available commands
+deepcool-lm --help
+```
+
+## Troubleshooting
+
+### Device Not Detected
+
+**Linux**: Verify the Deepcool LM device appears:
+```bash
+lsusb | grep 3633
+```
+
+**macOS**: Check System Information > USB for the Deepcool device
+
+### Temperature Shows 0°
+
+**macOS**: This typically means `powermetrics` cannot read your sensors. The display will still work but won't show accurate temperatures. Check logs for details.
+
+**Linux**: Ensure `lm_sensors` is properly configured:
+```bash
+sudo systemctl status lm_sensors
+sensors
+```
+
+### Service Won't Start
+
+**Linux**: Check logs for error messages:
+```bash
+sudo journalctl -u deepcool-lm -n 50
+```
+
+**macOS**: Check the log files:
+```bash
+sudo tail -20 /var/log/deepcool-lm.log
+sudo tail -20 /var/log/deepcool-lm.err
+```
+
+## Usage
+
+### Background Service (Recommended)
+
+#### Linux systemd
 
 The service runs the system monitor automatically in the background:
 
@@ -99,6 +253,25 @@ sudo journalctl -u deepcool-lm -f
 
 # Stop the service
 sudo systemctl stop deepcool-lm
+```
+
+#### macOS launchd
+
+If you install the LaunchDaemon, it runs the monitor in the background as root:
+
+```bash
+# Load the LaunchDaemon now
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.deepcool.lm.plist
+
+# Restart the daemon
+sudo launchctl kickstart -k system/com.deepcool.lm
+
+# Stop the daemon
+sudo launchctl bootout system /Library/LaunchDaemons/com.deepcool.lm.plist
+
+# View logs
+sudo tail -f /var/log/deepcool-lm.log
+sudo tail -f /var/log/deepcool-lm.err
 ```
 
 ### CLI Commands
@@ -173,7 +346,7 @@ sudo ./uninstall.sh
 ```
 
 This will:
-- Stop and disable the systemd service
+- Stop and disable the background service
 - Remove the service file
 - Remove the CLI tool
 - Clean up socket files
@@ -198,15 +371,17 @@ This will:
 - **Pixel Format**: RGB565 little-endian
 
 ### IPC Communication
-- **Socket**: `/var/run/deepcool-lm.sock`
+- **Linux socket**: `/var/run/deepcool-lm.sock`
+- **macOS socket**: `/tmp/deepcool-lm.sock`
 - **Protocol**: Unix domain socket with JSON commands
 - **Supported actions**: monitor, image, solid, brightness_up, brightness_down
 
 ### Temperature Sources
-- **CPU**: `coretemp` sensor (first core)
-- **GPU**: `nvme` sensor (if available)
+- **Linux CPU**: `coretemp` sensor (first core)
+- **Linux GPU**: `nvme` sensor (if available)
+- **macOS CPU/GPU**: `powermetrics --samplers smc -n 1 --format text` (best effort)
 
-The driver uses `psutil.sensors_temperatures()` to read system temperatures. You can check available sensors with:
+On Linux the driver uses `psutil.sensors_temperatures()` to read temperatures. You can check available sensors with:
 
 ```bash
 sensors
@@ -216,10 +391,13 @@ sensors
 
 ### Device Not Found
 ```bash
-# Check if device is detected
+# Linux: check if device is detected
 lsusb | grep 3633
 
 # Should show: Bus XXX Device XXX: ID 3633:0026
+
+# macOS: check USB registry
+ioreg -p IOUSB -l | grep 3633
 ```
 
 ### Permission Denied
@@ -231,23 +409,35 @@ sudo deepcool-lm monitor
 ### Service Won't Start
 Check logs for errors:
 ```bash
+# Linux
 sudo journalctl -u deepcool-lm -n 50
+
+# macOS
+sudo tail -n 50 /var/log/deepcool-lm.err
 ```
 
 ### Screen Goes Black When CLI Stops
-This is expected behavior when running CLI directly. Use the systemd service for persistent display:
+This is expected behavior when running CLI directly. Use the background service for persistent display:
 ```bash
+# Linux
 sudo systemctl start deepcool-lm
 sudo systemctl enable deepcool-lm  # Start on boot
+
+# macOS
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.deepcool.lm.plist
 ```
 
 ### Missing Temperature Sensors
 If temps show as 0°C, check available sensors:
 ```bash
+# Linux
 sensors
+
+# macOS
+sudo powermetrics --samplers smc -n 1 --format text
 ```
 
-You may need to load kernel modules:
+On Linux you may need to load kernel modules:
 ```bash
 sudo modprobe coretemp  # For Intel CPUs
 ```
@@ -259,6 +449,7 @@ sudo modprobe coretemp  # For Intel CPUs
 coolmaster-driver/
 ├── deepcool-lm              # Main CLI tool (standalone executable)
 ├── deepcool-lm.service      # Systemd service file
+├── com.deepcool.lm.plist    # macOS launchd service file
 ├── install.sh               # Installation script
 ├── uninstall.sh             # Uninstallation script
 ├── PKGBUILD                 # Arch Linux package build
